@@ -120,36 +120,60 @@ def get_categories():
 @app.get("/summary")
 def get_summary():
     connection = get_connection()
+    today = datetime.now()
+    start_date = datetime(today.year, today.month, 1)
+
+    if today.month == 12:
+        next_month = 1
+        next_year = today.year + 1
+    else:
+        next_month = today.month + 1
+        next_year = today.year
+
+    next_date = datetime(next_year, next_month, 1)
 
     try:
-        cursor = connection.cursor()
-        cursor.execute("""
-                SELECT bud_amount
-                FROM BUDGET
-                WHERE bud_date >= '2026-10-01'
-                  AND bud_date < '2026-11-01';
-            """)
+        cursor = None
+        try:
+            cursor = connection.cursor()
+            cursor.execute("""
+                    SELECT bud_amount
+                    FROM BUDGET
+                    WHERE bud_date >= %s
+                      AND bud_date < %s;
+                """,(start_date.date(), next_date.date()))
 
-        budget_result = cursor.fetchone()
-        budget = float(budget_result[0] or 0.0)
+            budget_result = cursor.fetchone()
 
-        cursor.execute("""
-                select sum(amount)
-                from expense
-                where date_time>='2026-10-01'
-                    and date_time <'2026-11-01';
-            """)
-        total_result = cursor.fetchone()
-        total = float(total_result[0])
+            if budget_result is None:
+                budget = 0.0    
+            else:
+                budget = float(budget_result[0] or 0.0)
 
-        remaining = budget-total
 
-        return{
-            "budget": budget,
-            "total_expenses" : total,
-            "remaining_budget": remaining
-        }
+            cursor.execute("""
+                    select sum(amount)
+                    from expense
+                    where date_time >=%s
+                        and date_time < %s;
+                """,(start_date,next_date))
+        
+            total_result = cursor.fetchone()
+            total = float(total_result[0] or 0.0)
 
+            if budget_result is None:
+                remaining = None
+            else:
+                remaining = budget - total
+
+            return{
+                "budget": budget,
+                "total_expenses" : total,
+                "remaining_budget": remaining
+            }
+
+        finally:
+            if cursor is not None:
+                cursor.close()
     finally:
-        cursor.close()
         connection.close()
