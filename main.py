@@ -1,11 +1,11 @@
 from fastapi import FastAPI
 from db import get_connection
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime , date , timedelta
 from fastapi import HTTPException
 
 class ExpenseCreate(BaseModel):
-    amount:float
+    amount:float = Field(gt=0,le=99999999.99)
     cat_id:str
     date_time:datetime
 
@@ -105,9 +105,24 @@ def get_expenses(
 @app.post("/expenses")
 def create_expense(expense: ExpenseCreate):
     connection = get_connection()
+    cursor = None
 
     try:
         cursor = connection.cursor()
+
+        cursor.execute("""
+                    SELECT 1
+                    FROM CATEGORY
+                    WHERE cat_id = %s;
+                """, (expense.cat_id,))
+
+        category_result = cursor.fetchone()
+
+        if category_result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Category not found"
+            )
 
         cursor.execute(
             """
@@ -128,15 +143,20 @@ def create_expense(expense: ExpenseCreate):
             "cat_id": row[3]
         }
 
-    except Exception as error:
+    except HTTPException:
+        connection.rollback()
+        raise
+
+    except Exception:
         connection.rollback()
         raise HTTPException(
-            status_code=400,
-            detail=str(error)
+            status_code=500,
+            detail= "Failed to create expense"
         )
 
     finally:
-        cursor.close()
+        if cursor is not None:
+            cursor.close()
         connection.close()
 
 
