@@ -18,23 +18,38 @@ def home():
 
 
 @app.get("/expenses")
-def get_expenses():
+def get_expenses(category:str | None = None):
     connection = get_connection()
 
     try:
         cursor = connection.cursor()
-        cursor.execute("""
-                        SELECT
-                            e.exp_id,
-                            e.date_time,
-                            e.amount,
-                            e.cat_id,
-                            c.cat_name
-                        FROM EXPENSE AS e
-                        JOIN CATEGORY AS c
-                            ON e.cat_id = c.cat_id
-                        ORDER BY e.date_time DESC;
-                    """)
+        if category is None:
+            cursor.execute("""
+                            SELECT
+                                e.exp_id,
+                                e.date_time,
+                                e.amount,
+                                e.cat_id,
+                                c.cat_name
+                            FROM EXPENSE AS e
+                            JOIN CATEGORY AS c
+                                ON e.cat_id = c.cat_id
+                            ORDER BY e.date_time DESC;
+                        """)
+        else:
+            cursor.execute("""
+                            SELECT
+                                e.exp_id,
+                                e.date_time,
+                                e.amount,
+                                e.cat_id,
+                                c.cat_name
+                            FROM EXPENSE AS e
+                            JOIN CATEGORY AS c
+                                ON e.cat_id = c.cat_id
+                            WHERE e.cat_id = %s
+                            ORDER BY e.date_time DESC; 
+                        """,(category,))    
 
         expenses = cursor.fetchall()
 
