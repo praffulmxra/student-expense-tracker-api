@@ -3,15 +3,16 @@ from db import get_connection
 from pydantic import BaseModel, Field
 from datetime import datetime , date , timedelta
 from fastapi import HTTPException
+from decimal import Decimal
 
 class ExpenseCreate(BaseModel):
-    amount:float = Field(gt=0,le=99999999.99)
+    amount:Decimal = Field(gt=0,le=99999999.99)
     cat_id:str
     date_time:datetime
 
 class BudgetCreate(BaseModel):
     bud_date: date
-    bud_amount: float = Field(gt=0, le=99999999.99)    
+    bud_amount: Decimal = Field(gt=0, le=99999999.99)    
 
 
 app =  FastAPI(title="Student Expense Tracker API")
@@ -27,9 +28,12 @@ def get_expenses(
     start_date:date | None = None,
     end_date:date | None = None
     ):
-    connection = get_connection()
+
+    connection = None
+    cursor = None
 
     try:
+        connection = get_connection()
         cursor = connection.cursor()
 
         conditions = []
@@ -102,16 +106,19 @@ def get_expenses(
         ]
 
     finally:
-        cursor.close()
-        connection.close()
+        if cursor is not None:
+            cursor.close()
+        if connection is not None:
+            connection.close()
 
 
 @app.post("/expenses")
 def create_expense(expense: ExpenseCreate):
-    connection = get_connection()
+    connection = None
     cursor = None
 
     try:
+        connection = get_connection()
         cursor = connection.cursor()
 
         cursor.execute("""
@@ -143,16 +150,18 @@ def create_expense(expense: ExpenseCreate):
         return {
             "exp_id": row[0],
             "date_time": row[1].isoformat(),
-            "amount": float(row[2]),
+            "amount": row[2],
             "cat_id": row[3]
         }
 
     except HTTPException:
-        connection.rollback()
+        if connection is not None:
+            connection.rollback()
         raise
 
     except Exception:
-        connection.rollback()
+        if connection is not None:
+            connection.rollback()
         raise HTTPException(
             status_code=500,
             detail= "Failed to create expense"
@@ -161,15 +170,18 @@ def create_expense(expense: ExpenseCreate):
     finally:
         if cursor is not None:
             cursor.close()
-        connection.close()
+        if connection is not None:
+            connection.close()
 
 
 
 @app.get("/categories")
 def get_categories():
-    connection = get_connection()
+    connection = None
+    cursor = None
 
     try:
+        connection = get_connection()
         cursor = connection.cursor()
         cursor.execute("""
             SELECT cat_id, cat_name
@@ -185,13 +197,14 @@ def get_categories():
         ]
 
     finally:
-        cursor.close()
-        connection.close()
+        if cursor is not None:
+            cursor.close()
+        if connection is not None:
+            connection.close()
 
 
 @app.get("/summary")
 def get_summary():
-    connection = get_connection()
     today = datetime.now()
     start_date = datetime(today.year, today.month, 1)
 
@@ -204,51 +217,54 @@ def get_summary():
 
     next_date = datetime(next_year, next_month, 1)
 
+    connection = None
+    cursor = None
+
     try:
-        cursor = None
-        try:
-            cursor = connection.cursor()
-            cursor.execute("""
-                    SELECT bud_amount
-                    FROM BUDGET
-                    WHERE bud_date >= %s
-                      AND bud_date < %s;
-                """,(start_date.date(), next_date.date()))
+        connection = get_connection()
+        cursor = connection.cursor()
 
-            budget_result = cursor.fetchone()
+        cursor.execute("""
+            SELECT bud_amount
+            FROM BUDGET
+            WHERE bud_date >= %s
+              AND bud_date < %s;
+        """, (start_date.date(), next_date.date()))
 
-            if budget_result is None:
-                budget = 0.0    
-            else:
-                budget = float(budget_result[0] or 0.0)
+        budget_result = cursor.fetchone()
 
+        if budget_result is None:
+            budget = Decimal("0.00")
+        else:
+            budget = budget_result[0] or Decimal("0.00")
 
-            cursor.execute("""
-                    select sum(amount)
-                    from expense
-                    where date_time >=%s
-                        and date_time < %s;
-                """,(start_date,next_date))
-        
-            total_result = cursor.fetchone()
-            total = float(total_result[0] or 0.0)
+        cursor.execute("""
+            SELECT SUM(amount)
+            FROM EXPENSE
+            WHERE date_time >= %s
+              AND date_time < %s;
+        """, (start_date, next_date))
 
-            if budget_result is None:
-                remaining = None
-            else:
-                remaining = budget - total
+        total_result = cursor.fetchone()
+        total = total_result[0] or Decimal("0.00")
 
-            return{
-                "budget": budget,
-                "total_expenses" : total,
-                "remaining_budget": remaining
-            }
+        if budget_result is None:
+            remaining = None
+        else:
+            remaining = budget - total
 
-        finally:
-            if cursor is not None:
-                cursor.close()
+        return {
+            "budget": budget,
+            "total_expenses": total,
+            "remaining_budget": remaining
+        }
+
     finally:
-        connection.close()
+        if cursor is not None:
+            cursor.close()
+
+        if connection is not None:
+            connection.close()
 
 
 @app.put("/budget")
@@ -280,15 +296,17 @@ def set_budget(budget : BudgetCreate):
         return {
             "bud_id": row[0],
             "bud_date": row[1].isoformat(),
-            "bud_amount": float(row[2])
+            "bud_amount": row[2]
         }
 
     except HTTPException:
-        connection.rollback()
+        if connection is not None:
+            connection.rollback()
         raise
 
     except Exception:
-        connection.rollback()
+        if connection is not None:
+            connection.rollback()
         raise HTTPException(
             status_code=500,
             detail="Failed to set budget"
@@ -297,7 +315,8 @@ def set_budget(budget : BudgetCreate):
     finally:
         if cursor is not None:
             cursor.close()
-        connection.close()        
+        if connection is not None:
+            connection.close()        
 
 
 
@@ -331,11 +350,9 @@ def get_budget(month: date):
         }
 
     except HTTPException:
-        connection.rollback()
         raise
 
     except Exception:
-        connection.rollback()
         raise HTTPException(
             status_code = 500,
             detail = "Failed to fetch budget"
@@ -345,4 +362,5 @@ def get_budget(month: date):
     finally:
         if cursor is not None:
             cursor.close()
-        connection.close()
+        if connection is not None:
+            connection.close()
