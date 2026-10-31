@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from db import get_connection
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime , date , timedelta
 from fastapi import HTTPException
 
 class ExpenseCreate(BaseModel):
@@ -18,38 +18,71 @@ def home():
 
 
 @app.get("/expenses")
-def get_expenses(category:str | None = None):
+def get_expenses(
+    category:str | None = None,
+    start_date:date | None = None,
+    end_date:date | None = None
+    ):
     connection = get_connection()
 
     try:
         cursor = connection.cursor()
-        if category is None:
+
+        conditions = []
+        params = []
+
+        if start_date is not None and end_date is not None:
+            if start_date > end_date:
+                raise HTTPException(
+                    status_code=400,
+                    detail="start_date cannot be after end_date"
+                )
+
+        if category is not None:
             cursor.execute("""
-                            SELECT
-                                e.exp_id,
-                                e.date_time,
-                                e.amount,
-                                e.cat_id,
-                                c.cat_name
-                            FROM EXPENSE AS e
-                            JOIN CATEGORY AS c
-                                ON e.cat_id = c.cat_id
-                            ORDER BY e.date_time DESC;
-                        """)
-        else:
-            cursor.execute("""
-                            SELECT
-                                e.exp_id,
-                                e.date_time,
-                                e.amount,
-                                e.cat_id,
-                                c.cat_name
-                            FROM EXPENSE AS e
-                            JOIN CATEGORY AS c
-                                ON e.cat_id = c.cat_id
-                            WHERE e.cat_id = %s
-                            ORDER BY e.date_time DESC; 
-                        """,(category,))    
+                            SELECT 1 
+                            FROM CATEGORY 
+                            WHERE cat_id = %s;
+                            """,(category,))
+            
+            category_result = cursor.fetchone()
+
+            if category_result is None:
+                raise HTTPException(
+                    status_code = 404,
+                    detail = "Category not found"
+                )
+            
+            conditions.append("e.cat_id = %s")
+            params.append(category)
+
+        if start_date is not None:
+            conditions.append("e.date_time >= %s")
+            params.append(start_date)
+
+        if end_date is not None:
+            conditions.append("e.date_time < %s")
+            params.append(datetime.combine(end_date + timedelta(days=1), datetime.min.time()))
+
+
+        query = """
+                    SELECT
+                        e.exp_id,
+                        e.date_time,
+                        e.amount,
+                        e.cat_id,
+                        c.cat_name
+                    FROM EXPENSE AS e
+                    JOIN CATEGORY AS c
+                        ON e.cat_id = c.cat_id
+                """
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY e.date_time DESC;"
+
+        cursor.execute(query, params)        
 
         expenses = cursor.fetchall()
 
