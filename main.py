@@ -9,6 +9,10 @@ class ExpenseCreate(BaseModel):
     cat_id:str
     date_time:datetime
 
+class BudgetCreate(BaseModel):
+    bud_date: date
+    bud_amount: float = Field(gt=0, le=99999999.99)    
+
 
 app =  FastAPI(title="Student Expense Tracker API")
 
@@ -244,4 +248,101 @@ def get_summary():
             if cursor is not None:
                 cursor.close()
     finally:
+        connection.close()
+
+
+@app.put("/budget")
+def set_budget(budget : BudgetCreate):
+    connection = None
+    cursor = None
+
+    try :
+        connection = get_connection()
+        if budget.bud_date.day != 1:
+            raise HTTPException(
+                status_code = 400,
+                detail = "Budget date must be the first day of the month"
+            )
+        cursor = connection.cursor()
+
+
+        cursor.execute("""
+                INSERT INTO BUDGET (bud_date, bud_amount)
+                VALUES (%s, %s)
+                ON CONFLICT (bud_date)
+                DO UPDATE SET bud_amount = EXCLUDED.bud_amount
+                RETURNING bud_id, bud_date, bud_amount;
+            """, (budget.bud_date, budget.bud_amount))
+
+        row = cursor.fetchone()
+        connection.commit()
+
+        return {
+            "bud_id": row[0],
+            "bud_date": row[1].isoformat(),
+            "bud_amount": float(row[2])
+        }
+
+    except HTTPException:
+        connection.rollback()
+        raise
+
+    except Exception:
+        connection.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to set budget"
+        )
+
+    finally:
+        if cursor is not None:
+            cursor.close()
+        connection.close()        
+
+
+
+@app.get("/budget")
+def get_budget(month: date):
+    connection = None
+    cursor = None
+
+    try:
+        connection = get_connection()
+        budget_month = date(month.year, month.month, 1)
+        cursor = connection.cursor()
+
+        cursor.execute("""
+                SELECT bud_id,bud_date,bud_amount
+                FROM BUDGET
+                WHERE bud_date = %s
+            """,(budget_month,))
+
+        budget_result = cursor.fetchone()
+
+        if budget_result is None:
+            raise HTTPException(
+                status_code = 404,
+                detail = "The budget month doesn't exist"
+            )
+        return {
+            "bud_id": budget_result[0],
+            "bud_date": budget_result[1].isoformat(),
+            "bud_amount": float(budget_result[2])
+        }
+
+    except HTTPException:
+        connection.rollback()
+        raise
+
+    except Exception:
+        connection.rollback()
+        raise HTTPException(
+            status_code = 500,
+            detail = "Failed to fetch budget"
+        )
+
+
+    finally:
+        if cursor is not None:
+            cursor.close()
         connection.close()
